@@ -1,0 +1,11 @@
+[package]
+name = "qpage"
+version = "1.0.0"
+edition = "2021"
+
+[dependencies]
+clap = { version = "4.5.4", features = ["derive"] }
+reqwest = "0.12.4"
+zip = "1.2.3"
+flate2 = "1.0.30"
+tar = "0.4.40"
