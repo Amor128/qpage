@@ -1,4 +1,11 @@
-use clap::{Arg, ArgGroup, ArgMatches, Command};
+mod model;
+
+use std::fs::File;
+use std::io::copy;
+use std::path::PathBuf;
+use clap::{Arg, ArgMatches, Command};
+use once_cell::sync::Lazy;
+use crate::model::Config;
 
 const ARTIFACTS_RELEASE_URL: &str = "http://172.31.3.252:8082";
 const QINCE_PAGE_RELEASE_PATH: &str = "/qince/?C=M;O=D";
@@ -12,6 +19,12 @@ mod options {
     pub const URL: &str = "url";
 }
 
+static CONFIG: Lazy<Config> = Lazy::new(|| {
+    let home_dir = dirs::home_dir().expect("Failed to get home directory");
+    let config_file_path = home_dir.join(".config/qcl/config.toml");
+    let config: Config = toml::from_str(&std::fs::read_to_string(config_file_path.as_path()).expect("Failed to read config file")).expect("Failed to parse config file");
+    config
+});
 
 fn main() -> Result<(), std::io::Error> {
     let matches: ArgMatches = command().get_matches();
@@ -29,16 +42,19 @@ fn main() -> Result<(), std::io::Error> {
     Ok(())
 }
 
-fn read_zip(zip_file_path: &str) -> Result<(), Box<dyn std::error::Error>> {
-    Ok(())
-}
-
 fn command() -> Command {
     Command::new("qpage")
         .about("all things pages")
         .arg(
+            Arg::new(options::APP)
+                .short('a')
+                .help("local app name")
+                .required(true)
+        )
+        .arg(
             Arg::new(options::TERM)
                 .short('t')
+                .help("web, h5, dinghuo")
         )
         .arg(
             Arg::new(options::MODULE)
@@ -55,21 +71,14 @@ fn command() -> Command {
                 .short('u')
                 .help("url of page")
         )
-        .arg(
-            Arg::new(options::APP)
-                .short('a')
-                .help("local app name")
-                .required(true)
-        )
-        .group(ArgGroup::new("located_by_term_module_version")
-            .args(&[options::TERM, options::MODULE, options::VERSION])
-            .conflicts_with("located_by_url")
-        ).group(ArgGroup::new("located_by_url")
-        .args(&[options::URL])
-        .conflicts_with("located_by_term_module_version"))
 }
 
 fn execute_url(url: Option<&String>, app: Option<&String>) -> Result<(), Box<dyn std::error::Error>> {
+    if url.is_none() {
+        panic!("url is required");
+    }
+    let page_file_path = download_page_and_extract_html_file(url.unwrap())?;
+    install_page(&page_file_path, app.unwrap())?;
     Ok(())
 }
 
@@ -103,4 +112,50 @@ fn extract_page_url(html_text: &str, term: &str, module: &str, version: &str) ->
     }
     Ok(url)
 }
+
+
+fn download_page_and_extract_html_file(url: &str) -> Result<(PathBuf), Box<dyn std::error::Error>> {
+    let cache_dir = dirs::data_local_dir().unwrap().join("qpage");
+    std::fs::create_dir_all(&cache_dir)?;
+
+    let mut response = reqwest::blocking::get(url)?;
+    let file_name = url.split("/").last().unwrap();
+    let mut file = File::create(cache_dir.join(file_name))?;
+    copy(&mut response, &mut file)?;
+
+    let tar_gz = File::open(cache_dir.join(file_name))?;
+    let tar = flate2::read::GzDecoder::new(tar_gz);
+    let mut archive = tar::Archive::new(tar);
+    let mut target_path = None;
+    for entry in archive.entries()? {
+        let mut entry = entry?;
+        let path = entry.path()?;
+        if let Some(file_name) = path.file_name() {
+            if let Some(file_name) = file_name.to_str() {
+                if file_name.ends_with(".html") {
+                    let mut file = File::create(cache_dir.join(file_name))?;
+                    target_path = Some(cache_dir.join(file_name));
+                    std::io::copy(&mut entry, &mut file)?;
+                }
+            }
+        }
+    }
+    if let Some(target_path) = target_path {
+        return Ok(target_path);
+    } else {
+        return Err("No html file found in the archive".into());
+    }
+}
+
+fn install_page(page_file_path: &PathBuf, app: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let app_config = CONFIG.apps.iter().find(|a| a.name == app).expect("App not found");
+    let src_target_dir_path = PathBuf::from(&app_config.home_path).join("src/main/webapp/sysapp/react/web");
+    let target_target_dir_path = PathBuf::from(&app_config.exploed_war_path).join("sysapp/react/web");
+    let page_file_name = page_file_path.file_name().unwrap().to_str().unwrap();
+    std::fs::copy(page_file_path, src_target_dir_path.join(page_file_name))?;
+    std::fs::copy(page_file_path, target_target_dir_path.join(page_file_name))?;
+    Ok(())
+}
+
+
 
