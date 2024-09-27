@@ -8,7 +8,8 @@ use std::io::copy;
 use std::path::PathBuf;
 
 const ARTIFACTS_RELEASE_URL: &str = "http://172.31.3.252:8082";
-const QINCE_PAGE_RELEASE_PATH: &str = "/qince/?C=M;O=D";
+const QINCE_PAGE_RELEASE_PATH: &str = "/qince";
+const QINCE_PAGE_FILTER: &str = "?C=M;O=D";
 
 mod options {
     pub const TERM: &str = "term";
@@ -24,7 +25,7 @@ static CONFIG: Lazy<Config> = Lazy::new(|| {
     let config: Config = toml::from_str(
         &std::fs::read_to_string(config_file_path.as_path()).expect("Failed to read config file"),
     )
-    .expect("Failed to parse config file");
+        .expect("Failed to parse config file");
     config
 });
 
@@ -41,7 +42,7 @@ fn main() -> Result<(), std::io::Error> {
     } else {
         execute_locator(term, module, version, app)
     }
-    .expect("Failed to execute command with given arguments");
+        .expect("Failed to execute command with given arguments");
     Ok(())
 }
 
@@ -91,8 +92,8 @@ fn execute_locator(
         panic!("term, module and version are required");
     }
     let html_text = fetch_html_text(&format!(
-        "{}{}",
-        ARTIFACTS_RELEASE_URL, QINCE_PAGE_RELEASE_PATH
+        "{}{}/{}",
+        ARTIFACTS_RELEASE_URL, QINCE_PAGE_RELEASE_PATH, QINCE_PAGE_FILTER
     ))?;
     let page_url = extract_page_url(&html_text, term.unwrap(), module.unwrap(), version.unwrap())?;
     execute_url(Some(&page_url), app)?;
@@ -117,7 +118,7 @@ fn extract_page_url(
     for element in document.select(&selector) {
         let href = element.value().attr("href").unwrap();
         if href.contains(term) && href.contains(module) && href.contains(version) {
-            url = href.to_string();
+            url = format!("{}{}/{}", ARTIFACTS_RELEASE_URL, QINCE_PAGE_RELEASE_PATH, href);
             break;
         }
     }
